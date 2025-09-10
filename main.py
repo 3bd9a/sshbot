@@ -1,76 +1,108 @@
 import asyncio
+import json
+import os
 import requests
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import TelegramError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from config import BOT_TOKEN, CHANNEL_ID, API_URL, STORE_OWNER_ID, INTERVAL_MINUTES
+from config import BOT_TOKEN, CHANNEL_ID, API_URL, STORE_OWNER_ID
 
-# Check if BOT_TOKEN and CHANNEL_ID are set
-if not BOT_TOKEN or not CHANNEL_ID:
-    raise ValueError("BOT_TOKEN and CHANNEL_ID must be set in .env file")
+# ملف تخزين آخر ID للرسالة
+LAST_MSG_FILE = "last_message.json"
 
-# Store the last message ID for deletion
-last_message_id = None
+def save_last_message_id(message_id: int):
+    """حفظ آخر ID في ملف."""
+    with open(LAST_MSG_FILE, "w") as f:
+        json.dump({"last_message_id": message_id}, f)
+
+def load_last_message_id():
+    """تحميل آخر ID من الملف."""
+    if os.path.exists(LAST_MSG_FILE):
+        with open(LAST_MSG_FILE, "r") as f:
+            try:
+                data = json.load(f)
+                return data.get("last_message_id")
+            except json.JSONDecodeError:
+                return None
+    return None
 
 async def fetch_ssh_account():
-    """Fetch SSH account from the API."""
+    """جلب حساب SSH من API."""
     try:
         response = requests.post(API_URL, json={"store_owner_id": STORE_OWNER_ID})
         response.raise_for_status()
         data = response.json()
-        usuario = data.get("Usuario") or data.get("usuario", "N/A")
-        senha = data.get("Senha") or data.get("senha", "N/A")
-        ip = data.get("IP", "N/A")
-        expiracao = data.get("Expiracao", "N/A")
-        limite = data.get("limite", "N/A")
-        
-        message = f"🔐 حساب SSH جديد:\n\n👤 المستخدم: `{usuario}`\n🔑 كلمة المرور: `{senha}`\n⏰ انتهاء: {expiracao}"
-        return message
+        usuario = data.get("Usuario") or data.get("usuario")
+        senha = data.get("Senha") or data.get("senha")
+        expiracao = data.get("Expiracao")
+
+        if not usuario or not senha:
+            return None, "⚠️ لم يتم استرجاع بيانات الحساب من API."
+
+        message = (
+            "🔐 **حساب SSH جديد**\n\n"
+            f"👤 المستخدم: `{usuario}`\n"
+            f"🔑 كلمة المرور: `{senha}`\n"
+            f"⏰ انتهاء: {expiracao or 'N/A'}"
+        )
+
+        # أزرار النسخ
+        buttons = [
+            [InlineKeyboardButton("👤 نسخ المستخدم", callback_data=f"copy:{usuario}")],
+            [InlineKeyboardButton("🔑 نسخ كلمة المرور", callback_data=f"copy:{senha}")]
+        ]
+        return InlineKeyboardMarkup(buttons), message
     except requests.RequestException as e:
-        return f"❌ خطأ في جلب الحساب: {str(e)}"
+        return None, f"❌ خطأ في جلب الحساب: {str(e)}"
 
 async def send_ssh_to_channel():
-    """Send SSH account to the Telegram channel and delete previous message."""
-    global last_message_id
+    """إرسال حساب SSH إلى القناة وحذف الرسالة السابقة إن وجدت."""
     bot = Bot(token=BOT_TOKEN)
-    
-    # Delete previous message if exists
+
+    # تحميل آخر رسالة مرسلة
+    last_message_id = load_last_message_id()
+
+    # حذف الرسالة السابقة
     if last_message_id:
         try:
             await bot.delete_message(chat_id=CHANNEL_ID, message_id=last_message_id)
             print("🗑️ تم حذف الرسالة السابقة.")
         except TelegramError as e:
             print(f"⚠️ لم يتم حذف الرسالة السابقة: {str(e)}")
-    
-    # Send new message
-    message = await fetch_ssh_account()
+
+    # جلب الحساب الجديد
+    keyboard, message = await fetch_ssh_account()
+
+    # إرسال الرسالة
     try:
-        sent_message = await bot.send_message(chat_id=CHANNEL_ID, text=message, parse_mode="Markdown")
-        last_message_id = sent_message.message_id
-        print("✅ تم إرسال الحساب الجديد إلى القناة مع أزرار النسخ.")
+        sent_message = await bot.send_message(
+            chat_id=CHANNEL_ID,
+            text=message,
+            parse_mode="Markdown",
+            reply_markup=keyboard if keyboard else None
+        )
+        save_last_message_id(sent_message.message_id)
+        print("✅ تم إرسال الحساب الجديد وتحديث last_message.json")
     except TelegramError as e:
         print(f"❌ خطأ في إرسال الرسالة: {str(e)}")
 
-
 async def main():
-    """Main function to start the scheduler with 60-minute interval."""
-    # Send immediately on startup
+    """تشغيل البوت مع الجدولة."""
+    # إرسال أول رسالة عند التشغيل
     await send_ssh_to_channel()
-    
-    # Then schedule it every 60 seconds
+
+    # إعادة الإرسال كل 3 ساعات
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(send_ssh_to_channel, 'interval', seconds=10800, id='ssh_job')
+    scheduler.add_job(send_ssh_to_channel, 'interval', hours=3, id='ssh_job')
     scheduler.start()
-    
-    print(f"🚀 البوت يعمل... سيرسل حساب كل 60 ثانية إلى {CHANNEL_ID}")
-    
-    # Keep the bot running
+
+    print(f"🚀 البوت يعمل... سيرسل حساب جديد كل 3 ساعات إلى {CHANNEL_ID}")
+
     try:
         await asyncio.Future()  # Run forever
     except KeyboardInterrupt:
         print("⏹️ تم إيقاف البوت.")
         scheduler.shutdown()
-
 
 if __name__ == "__main__":
     asyncio.run(main())
