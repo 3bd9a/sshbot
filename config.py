@@ -1,16 +1,23 @@
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load environment variables from .env file (useful locally)
 load_dotenv()
 
-# Configuration for the Telegram Bot
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Replace with your bot token from BotFather
-CHANNEL_ID = os.getenv("CHANNEL_ID")  # Replace with your channel ID (e.g., @channel or -1001234567890)
+# ===============================
+# Telegram Bot Configuration
+# ===============================
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # من BotFather
+CHANNEL_ID = os.getenv("CHANNEL_ID")  # مثال: @channel أو -1001234567890
 
+# ===============================
 # API Configuration
-API_URL = "https://painel.meowssh.shop:5000/test_ssh_public"
-STORE_OWNER_ID = 1
+# ===============================
+API_URL = os.getenv("API_URL", "https://painel.meowssh.shop:5000/test_ssh_public")
+STORE_OWNER_ID = int(os.getenv("STORE_OWNER_ID", 1))
 
+# ===============================
 # Scheduler Configuration
-INTERVAL_MINUTES = 10
+# ===============================
+# الافتراضي: كل 3 ساعات (180 دقيقة)
+INTERVAL_MINUTES = int(os.getenv("INTERVAL_MINUTES", 180))
