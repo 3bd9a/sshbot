@@ -11,12 +11,10 @@ from config import BOT_TOKEN, CHANNEL_ID, API_URL, STORE_OWNER_ID
 LAST_MSG_FILE = "last_message.json"
 
 def save_last_message_id(message_id: int):
-    """حفظ آخر ID في ملف."""
     with open(LAST_MSG_FILE, "w") as f:
         json.dump({"last_message_id": message_id}, f)
 
 def load_last_message_id():
-    """تحميل آخر ID من الملف."""
     if os.path.exists(LAST_MSG_FILE):
         with open(LAST_MSG_FILE, "r") as f:
             try:
@@ -46,7 +44,6 @@ async def fetch_ssh_account():
             f"⏰ انتهاء: {expiracao or 'N/A'}"
         )
 
-        # أزرار النسخ
         buttons = [
             [InlineKeyboardButton("👤 نسخ المستخدم", callback_data=f"copy:{usuario}")],
             [InlineKeyboardButton("🔑 نسخ كلمة المرور", callback_data=f"copy:{senha}")]
@@ -56,24 +53,27 @@ async def fetch_ssh_account():
         return None, f"❌ خطأ في جلب الحساب: {str(e)}"
 
 async def send_ssh_to_channel():
-    """إرسال حساب SSH إلى القناة وحذف الرسالة السابقة إن وجدت."""
+    """إرسال حساب SSH جديد مع تثبيت الرسالة وحذف القديم."""
     bot = Bot(token=BOT_TOKEN)
 
-    # تحميل آخر رسالة مرسلة
+    # فك تثبيت الرسالة القديمة + حذفها
     last_message_id = load_last_message_id()
-
-    # حذف الرسالة السابقة
     if last_message_id:
+        try:
+            await bot.unpin_chat_message(chat_id=CHANNEL_ID, message_id=last_message_id)
+            print("📌 تم فك تثبيت الرسالة السابقة.")
+        except TelegramError:
+            pass
         try:
             await bot.delete_message(chat_id=CHANNEL_ID, message_id=last_message_id)
             print("🗑️ تم حذف الرسالة السابقة.")
-        except TelegramError as e:
-            print(f"⚠️ لم يتم حذف الرسالة السابقة: {str(e)}")
+        except TelegramError:
+            pass
 
     # جلب الحساب الجديد
     keyboard, message = await fetch_ssh_account()
 
-    # إرسال الرسالة
+    # إرسال وتثبيت الرسالة الجديدة
     try:
         sent_message = await bot.send_message(
             chat_id=CHANNEL_ID,
@@ -82,16 +82,16 @@ async def send_ssh_to_channel():
             reply_markup=keyboard if keyboard else None
         )
         save_last_message_id(sent_message.message_id)
-        print("✅ تم إرسال الحساب الجديد وتحديث last_message.json")
+
+        await bot.pin_chat_message(chat_id=CHANNEL_ID, message_id=sent_message.message_id, disable_notification=True)
+        print("📌 تم تثبيت الرسالة الجديدة.")
+
     except TelegramError as e:
         print(f"❌ خطأ في إرسال الرسالة: {str(e)}")
 
 async def main():
-    """تشغيل البوت مع الجدولة."""
-    # إرسال أول رسالة عند التشغيل
     await send_ssh_to_channel()
 
-    # إعادة الإرسال كل 3 ساعات
     scheduler = AsyncIOScheduler()
     scheduler.add_job(send_ssh_to_channel, 'interval', hours=3, id='ssh_job')
     scheduler.start()
@@ -99,7 +99,7 @@ async def main():
     print(f"🚀 البوت يعمل... سيرسل حساب جديد كل 3 ساعات إلى {CHANNEL_ID}")
 
     try:
-        await asyncio.Future()  # Run forever
+        await asyncio.Future()
     except KeyboardInterrupt:
         print("⏹️ تم إيقاف البوت.")
         scheduler.shutdown()
